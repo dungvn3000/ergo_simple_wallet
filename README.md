@@ -4,6 +4,19 @@ A light-client Ergo wallet written in **Scala 2.12** + Swing, built with **sbt**
 The wallet does not download the blockchain. It verifies the chain with NiPoPoW proofs fetched from several nodes,
 then proves that every box of the wallet is unspent with an AVL proof checked against the `stateRoot` of a verified block.
 
+> [!WARNING]
+> **Disclaimer: experimental software, use at your own risk.**
+> - This wallet has **not been audited** and has only been tested end to end on a local devnet; it has never sent a
+>   real mainnet transaction. Bugs can lose funds. Try a small amount first, and never keep more in it than you can
+>   afford to lose.
+> - **Back up your mnemonic** on paper. The encrypted wallet file and its backups are useless without the password,
+>   and no one can recover a lost mnemonic or password for you.
+> - It is an independent project, **not affiliated with or endorsed by the Ergo Platform or the Ergo Foundation**.
+> - Token names, history, prices and fee suggestions come from third parties and are not verified. Always check the
+>   recipient, the amounts and the "This wallet gives" line before you sign.
+> - Provided "as is", without warranty of any kind, under the MIT License (see `LICENSE`). The authors are not liable
+>   for any loss.
+
 ## Screenshots
 
 Taken from the real app on the [local devnet](#local-devnet-test-coins) (test coins, `3W…` addresses);
