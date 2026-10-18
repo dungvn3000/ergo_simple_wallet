@@ -4,6 +4,27 @@ A light-client Ergo wallet written in **Scala 2.12** + Swing, built with **sbt**
 The wallet does not download the blockchain. It verifies the chain with NiPoPoW proofs fetched from several nodes,
 then proves that every box of the wallet is unspent with an AVL proof checked against the `stateRoot` of a verified block.
 
+## Screenshots
+
+Taken from the real app on the [local devnet](#local-devnet-test-coins) (test coins, `3W…` addresses);
+regenerate them with `devnet/screenshots.sh`.
+
+| Overview: proven balance and tokens | Send ERG and tokens |
+|---|---|
+| ![Overview](docs/screenshots/overview.png) | ![Send](docs/screenshots/send.png) |
+
+| Confirmation: what leaves the wallet | Startup: NiPoPoW verification |
+|---|---|
+| ![Confirm transaction](docs/screenshots/confirm.png) | ![Splash](docs/screenshots/splash.png) |
+
+| Receive: payment link and QR code | Transaction history |
+|---|---|
+| ![Receive](docs/screenshots/receive.png) | ![History](docs/screenshots/history.png) |
+
+| Addresses: derived addresses, labels, rescan |
+|---|
+| ![Addresses](docs/screenshots/addresses.png) |
+
 ## What is NiPoPoW for?
 
 NiPoPoW lets the wallet **check for itself** what nodes tell it, instead of trusting them blindly, without downloading the whole blockchain.
@@ -107,6 +128,7 @@ devnet/check.sh           # end-to-end check: NiPoPoW sync, funding, proven bala
 devnet/wallet.sh          # opens the wallet on the devnet
 devnet/fund.sh <address> 100   # sends 100 test ERG from the node's mining wallet to your wallet address
 devnet/mint.sh <address> DevUSD 1000 2   # mints a new token (1000.00 DevUSD) straight to an address
+devnet/screenshots.sh     # retakes docs/screenshots/*.png from the real app (throw-away wallet folder)
 ```
 
 - Mining rewards can be spent after 720 blocks: `check.sh` and `fund.sh` work once the chain is past ~730 blocks

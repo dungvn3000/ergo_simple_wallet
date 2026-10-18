@@ -1119,7 +1119,8 @@ final class WalletApp {
       }
     }
     panel.setBorder(BorderFactory.createEmptyBorder(14, 14, 14, 14))
-    panel.add(new JLabel("<html>History comes from the explorer (display only, not NiPoPoW-verified). Double-click a row for details.</html>"), BorderLayout.NORTH)
+    panel.add(new JLabel(s"<html>History comes from the ${if (Ergo.Devnet) "node's address index" else "explorer"} " +
+      "(display only, not NiPoPoW-verified). Double-click a row for details.</html>"), BorderLayout.NORTH)
     panel.add(new JScrollPane(t), BorderLayout.CENTER)
     panel.add(row(load), BorderLayout.SOUTH)
 

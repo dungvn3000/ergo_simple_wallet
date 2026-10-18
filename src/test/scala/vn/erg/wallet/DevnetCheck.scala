@@ -98,7 +98,7 @@ object DevnetCheck {
   }
 
   /** The node's own wallet API (needs the API key, which the app never uses). */
-  private def nodeWallet(path: String, jsonBody: String): String = {
+  private[wallet] def nodeWallet(path: String, jsonBody: String): String = {
     val b = java.net.http.HttpRequest.newBuilder(java.net.URI.create(s"$Node/wallet/$path")).header("api_key", ApiKey)
     val req = if (jsonBody == null) b.GET() else b.header("Content-Type", "application/json").POST(java.net.http.HttpRequest.BodyPublishers.ofString(jsonBody))
     val r = java.net.http.HttpClient.newHttpClient().send(req.build(), java.net.http.HttpResponse.BodyHandlers.ofString())
