@@ -47,6 +47,7 @@ final class LightClient(m: Int = LightClient.M, k: Int = LightClient.K) {
       val p = new Proof(JsonParser.parseString(Http.get(s"$node/nipopow/proof/$m/$k")).getAsJsonObject, node)
       // the node must not pick its own security parameters: a smaller m or k makes a forged proof cheaper
       Nipopow.check(p.m == m && p.k == k, s"proof uses m=${p.m}, k=${p.k} instead of m=$m, k=$k")
+      Nipopow.check(enoughWork(p), s"suffix header difficulty below the mainnet minimum $MinMainnetDifficulty")
       p.verify(id => JsonParser.parseString(Http.get(s"$node/blocks/$id")).getAsJsonObject
         .getAsJsonObject("extension").getAsJsonArray("fields"))
       log(s"  valid from $node: ${p.prefix.size} prefix + ${p.suffix.size} suffix headers, tip height ${p.tip.height}")
@@ -132,6 +133,15 @@ object LightClient {
   val PageSize = 500
   val MaxPages = 200 // 100,000 boxes per address; also stops a node that ignores `offset` from looping forever
 
+  /**
+   * Proofs are only compared with each other: alone, a chain of difficulty-1 headers verifies and wins. Every suffix
+   * header must carry real mainnet difficulty (6.8e13 at height 1,897,174), so forging a tip costs mining k such blocks.
+   * shortcut: a fixed floor, ~30% of that difficulty; lower it if the network hashrate ever falls below it.
+   */
+  val MinMainnetDifficulty: BigInt = BigInt(2) * BigInt(10).pow(13)
+
+  def enoughWork(p: Proof): Boolean = Ergo.Devnet || p.suffix.forall(_.difficulty >= MinMainnetDifficulty)
+
   val StaleTipMs: Long = 30 * 60000L // blocks come every ~2 minutes; half an hour without one is very unlikely
 
   /** A stuck (or withholding) node can only offer an old tip: its balances are proven, but out of date. */
@@ -169,7 +179,7 @@ object LightClient {
   private implicit val hf: Blake2b256.type = Blake2b256
 
   /** None if the proof does not open against this state root; absent keys (spent boxes) are skipped. */
-  private def lookupAll(stateRoot: Array[Byte], proof: Array[Byte], ids: Seq[Array[Byte]], propositionBytes: Array[Byte]): Option[Seq[ErgoBox]] =
+  private[wallet] def lookupAll(stateRoot: Array[Byte], proof: Array[Byte], ids: Seq[Array[Byte]], propositionBytes: Array[Byte]): Option[Seq[ErgoBox]] =
     Try {
       val v = new BatchAVLVerifier[Digest32, Blake2b256.type](ADDigest @@ stateRoot, SerializedAdProof @@ proof, 32, None, None, None)
       ids.flatMap { id =>

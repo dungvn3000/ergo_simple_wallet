@@ -8,6 +8,9 @@ import org.ergoplatform.ErgoBox
 import org.ergoplatform.appkit.{Address, Parameters}
 import org.ergoplatform.sdk.{ErgoToken, SecretString}
 import org.scalatest.funsuite.AnyFunSuite
+import scorex.crypto.authds.avltree.batch.{BatchAVLProver, Insert, Lookup}
+import scorex.crypto.authds.ADValue
+import scorex.crypto.hash.{Blake2b256, Digest32}
 
 import scala.collection.mutable.ArrayBuffer
 
@@ -233,6 +236,26 @@ class ErgoSpec extends AnyFunSuite {
 
     assertThrows[IllegalStateException](Ergo.signReduced(reduced, s, Seq(0))) // index 0 key cannot sign index 1 box
     assert(Ergo.signedTxId(Ergo.signReduced(reduced, s, Seq(0, 1))).length == 64)
+  }
+
+  test("only boxes of the asked address, proven against the given state root, are returned") {
+    implicit val hf: Blake2b256.type = Blake2b256
+    val mine = box(1000000000L)
+    val others = box(Ergo.address(secret(), 5), 2000000000L) // listed by a lying address index
+    val spent = box(3000000000L) // not in the UTXO set
+    val prover = new BatchAVLProver[Digest32, Blake2b256.type](32, None)
+    Seq(mine, others).foreach(b => prover.performOneOperation(Insert(b.id, ADValue @@ b.bytes)))
+    prover.generateProof()
+    val root = prover.digest.clone()
+    val ids = Seq(mine.id, others.id, spent.id)
+    ids.foreach(id => prover.performOneOperation(Lookup(id)))
+    val proof = prover.generateProof()
+    val myTree = Address.create(Ergo.address(secret(), 0)).toPropositionBytes
+    val got = LightClient.lookupAll(root, proof, ids, myTree)
+    assert(got.map(_.map(b => Hex.toHexString(b.id))) == Some(Seq(Hex.toHexString(mine.id))))
+    val otherRoot = root.clone()
+    otherRoot(5) = (otherRoot(5) ^ 1).toByte
+    assert(LightClient.lookupAll(otherRoot, proof, ids, myTree).isEmpty)
   }
 
   private def box(value: Long, tokens: ErgoToken*): ErgoBox = box(Ergo.address(secret(), 0), value, tokens: _*)

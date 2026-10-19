@@ -87,6 +87,13 @@ final class WalletApp {
   private var view: Option[WalletView] = None
 
   private def show(): Unit = {
+    val free = try Store.lockFolder(Store.defaultDir) catch {
+      case e: IllegalStateException => Dialogs.error(null, e.getMessage); sys.exit(1)
+    }
+    if (!free) {
+      Dialogs.error(null, s"$AppTitle is already open in another window.")
+      sys.exit(0)
+    }
     store = openStore().getOrElse(sys.exit(0))
     splash()
   }
@@ -594,13 +601,15 @@ final class WalletApp {
 
   /** Runs off the EDT (token names come from the explorer). */
   private def describe(s: Ergo.TxSummary, myBoxes: Map[String, ErgoBox], mine: Set[String]): String = {
+    // decimals come from the explorer (unverified): the raw units are what the transaction really moves
+    def amt(v: Long, t: Ergo.TokenInfo) = amountText(v, t) + (if (t.decimals != 0) s" (= $v raw units)" else "")
     val sb = new StringBuilder("Outputs:\n")
     for (o <- s.outputs) {
       val who = if (o.address == Ergo.FeeAddress) "miner fee" else if (mine(o.address)) s"your wallet: ${o.address}" else o.address
       sb ++= s"  ${Ergo.erg(o.value)} ERG  →  $who\n"
       o.tokens.foreach { case (id, v) =>
         val t = token(id)
-        sb ++= s"        + ${amountText(v, t)} ${t.label}\n"
+        sb ++= s"        + ${amt(v, t)} ${t.label}\n"
       }
       if (!mine(o.address) && o.address != Ergo.FeeAddress && !Address.create(o.address).isP2PK)
         sb ++= "        ⚠ this output goes to a smart contract\n"
@@ -614,11 +623,11 @@ final class WalletApp {
     sb ++= s"\nThis wallet ${if (e.erg >= 0) "gives" else "receives"}: ${Ergo.erg(math.abs(e.erg))} ERG (fee included)\n"
     e.tokens.foreach { case (id, v) =>
       val t = token(id)
-      sb ++= s"        ${if (v > 0) "−" else "+"}${amountText(math.abs(v), t)} ${t.label}\n"
+      sb ++= s"        ${if (v > 0) "−" else "+"}${amt(math.abs(v), t)} ${t.label}\n"
     }
     e.burned.foreach { case (id, v) =>
       val t = token(id)
-      sb ++= s"⚠ BURNED (destroyed, in no output): ${amountText(v, t)} ${t.label}\n"
+      sb ++= s"⚠ BURNED (destroyed, in no output): ${amt(v, t)} ${t.label}\n"
     }
     if (e.unknownInputs > 0)
       sb ++= s"⚠ ${e.unknownInputs} input(s) are not verified boxes of this wallet; their value is not counted above\n"

@@ -80,10 +80,14 @@ So a node **cannot** invent funds you do not have, report a spent box as unspent
 
 **What NiPoPoW does not protect against:**
 - A node can still **hide some boxes**: the balance then shows lower than the real one, never higher.
-- Transaction history, token names and prices come from the explorer/CoinGecko and are **not verified**.
+- Transaction history, token names, token decimals and prices come from the explorer/CoinGecko and are **not verified**.
+  The send confirmation therefore also shows token amounts in raw units, which is what the transaction really moves.
 - You need **at least one honest node** in the node list.
 - Per-block difficulty is not checked against Ergo's adjustment rules (the reference implementation does not check it either).
-  Because proofs are scored by work, faking a winning chain still costs as much proof-of-work as the real one.
+  Because proofs are scored by work, faking a chain that beats the real one costs as much proof-of-work as the real one.
+  When no honest node answers there is nothing to compare with, so every suffix header must also carry at least
+  `LightClient.MinMainnetDifficulty` (2·10¹³, about 30% of the mainnet difficulty in late 2026): faking a tip alone then
+  still costs mining 10 blocks at that difficulty.
 
 ## Requirements
 

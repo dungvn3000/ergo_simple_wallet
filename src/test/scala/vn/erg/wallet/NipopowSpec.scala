@@ -79,6 +79,9 @@ class NipopowSpec extends AnyFunSuite {
     assert(forged.tip.height > honest.tip.height)
     assert(honest.isBetterThan(forged), "real work must win")
     assert(!forged.isBetterThan(honest), "more headers of no work must not win")
+    // alone (no honest node answered), only the difficulty floor stops it
+    assert(LightClient.enoughWork(honest))
+    assert(!LightClient.enoughWork(forged))
   }
 
   test("forged header id is rejected") {

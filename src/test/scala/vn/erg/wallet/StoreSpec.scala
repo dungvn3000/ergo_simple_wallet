@@ -40,6 +40,17 @@ class StoreSpec extends AnyFunSuite {
     (dir, st, w)
   }
 
+  test("a wallet folder already open in another app instance is refused") {
+    val dir = tempDir()
+    val other = java.nio.channels.FileChannel.open(dir.resolve("data.lock"),
+      java.nio.file.StandardOpenOption.CREATE, java.nio.file.StandardOpenOption.WRITE)
+    val held = other.lock()
+    assert(!Store.lockFolder(dir))
+    held.release()
+    other.close()
+    assert(Store.lockFolder(dir))
+  }
+
   // ---------------------------------------------------------------- file on disk
 
   test("create writes an owner-only, fully encrypted file and nothing else") {

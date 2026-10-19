@@ -3,7 +3,8 @@ package vn.erg.wallet
 import java.io.IOException
 import java.nio.charset.StandardCharsets
 import java.nio.file.attribute.PosixFilePermissions
-import java.nio.file.{Files, Path, Paths, StandardCopyOption}
+import java.nio.channels.{FileChannel, FileLock, OverlappingFileLockException}
+import java.nio.file.{Files, Path, Paths, StandardCopyOption, StandardOpenOption}
 import java.nio.{ByteBuffer, CharBuffer}
 import java.security.{GeneralSecurityException, MessageDigest, SecureRandom}
 import java.util.Arrays
@@ -218,6 +219,25 @@ object Store {
   def defaultDir: Path = Paths.get(System.getProperty("user.home"), ".ergo-simple-wallet" + (if (Ergo.Devnet) "-devnet" else ""))
 
   def exists(dir: Path): Boolean = Files.exists(dir.resolve("data.json"))
+
+  private var folderLock: FileLock = _ // held until the JVM exits
+
+  /**
+   * False if another app instance has `dir` open: each saves its whole in-memory copy, so the second one would
+   * overwrite (and lose) wallets the first one added.
+   */
+  def lockFolder(dir: Path): Boolean = synchronized {
+    try {
+      Files.createDirectories(dir)
+      restrict(dir, "rwx------")
+      val ch = FileChannel.open(dir.resolve("data.lock"), StandardOpenOption.CREATE, StandardOpenOption.WRITE)
+      val lock = try ch.tryLock() catch { case _: OverlappingFileLockException => null }
+      if (lock == null) ch.close() else folderLock = lock
+      lock != null
+    } catch {
+      case e: IOException => throw new IllegalStateException(s"Cannot open $dir: ${e.getMessage}", e)
+    }
+  }
 
   def create(dir: Path, password: Array[Char]): Store = {
     val s = new Store(dir.resolve("data.json"), new Data)
