@@ -211,6 +211,17 @@ QR codes are read from image files or a screenshot in the clipboard. The wallet 
 A multisig address is the contract `atLeast(k, Coll(PK(a), PK(b), …))`: any k of the n participants can spend from it.
 Every participant creates it in the *Multisig* tab from the **same addresses in the same order** and the same k, and so gets the same address.
 
+**Which address of a wallet to use.** Any address listed in the wallet's *Addresses* tab works: the wallet signs with the
+key at that address's index (#0, #1, …). Prefer the **main address (#0)**, which the dialog fills in:
+
+- Restoring from the mnemonic only finds derived addresses that have been used on chain. A derived address used only
+  as a multisig signer never received funds, so it is not found again, and the wallet no longer sees itself as a signer.
+  Add it back with *Add derived address* up to its index (the key comes from the same mnemonic; nothing is lost).
+  If you use a derived address, write its index down next to the mnemonic.
+- *Remove* on an address in the *Addresses* tab also stops the wallet from signing for it, until it is added again.
+- A wallet holding several of the signer addresses signs for all of them: in a 2-of-3 where one wallet holds two of
+  the addresses, that wallet alone can spend.
+
 Ergo's signatures are interactive (two rounds), so a spend goes round the signers as one **signing file** (JSON, no server involved).
 For 2 signers on two wallets:
 
