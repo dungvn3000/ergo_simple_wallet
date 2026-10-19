@@ -12,6 +12,7 @@ import org.ergoplatform.appkit._
 import org.ergoplatform.appkit.impl.InputBoxImpl
 import org.ergoplatform.sdk.wallet.secrets.ExtendedSecretKey
 import org.ergoplatform.sdk.{ErgoToken, JavaHelpers}
+import sigmastate.crypto.DLogProtocol.DLogProverInput
 import sigmastate.interpreter.HintsBag
 
 import scala.collection.JavaConverters._
@@ -116,15 +117,17 @@ object Ergo {
 
   /** EIP-3 keys handed to the prover as plain secrets, so appkit never sees the mnemonic. */
   private def prover(ctx: BlockchainContext, s: Store.Secret, indices: Seq[Int]): ErgoProver = {
+    val b = ctx.newProverBuilder()
+    dlogSecrets(s, indices).foreach(k => b.withDLogSecret(k.w))
+    b.build()
+  }
+
+  /** The EIP-3 private keys at `indices`. */
+  def dlogSecrets(s: Store.Secret, indices: Seq[Int]): Seq[DLogProverInput] = {
     val m = masterKey(s)
-    try {
-      val b = ctx.newProverBuilder()
-      indices.foreach { i =>
-        val k = m.derive(JavaHelpers.eip3DerivationWithLastIndex(i)).asInstanceOf[ExtendedSecretKey]
-        b.withDLogSecret(k.privateInput.w)
-        k.zeroSecret()
-      }
-      b.build()
+    try indices.map { i =>
+      val k = m.derive(JavaHelpers.eip3DerivationWithLastIndex(i)).asInstanceOf[ExtendedSecretKey]
+      try DLogProverInput(k.privateInput.w) finally k.zeroSecret()
     } finally m.zeroSecret()
   }
 

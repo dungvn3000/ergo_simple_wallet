@@ -67,7 +67,7 @@ class StoreSpec extends AnyFunSuite {
     assert(JsonParser.parseString(text).getAsJsonObject.keySet.toString == "[encrypted]")
   }
 
-  test("everything round-trips: settings, wallets, addresses with and without labels, contacts") {
+  test("everything round-trips: settings, wallets, addresses with and without labels, contacts, multisigs, nonces") {
     val dir = tempDir()
     val st = Store.create(dir, Pass.toCharArray)
     val w = newWallet(st, "w")
@@ -76,6 +76,8 @@ class StoreSpec extends AnyFunSuite {
     st.data.contacts += Store.Contact("Bob", "addr-bob")
     st.data.settings.fiat = "eur"
     st.data.settings.nodes = Vector("https://node.example")
+    st.data.multisigs += Store.Multisig("joint", 2, Vector("addr-0", "addr-bob", "addr-c"), "addr-ms")
+    st.data.nonces("tx/addr-0") = st.sealSecret("nonce".getBytes(StandardCharsets.UTF_8))
     st.save()
 
     val back = Store.unlock(dir, Pass.toCharArray).data
@@ -84,6 +86,8 @@ class StoreSpec extends AnyFunSuite {
     assert(bw.addresses.map(a => (a.index, a.address, a.label)) == ArrayBuffer((0, "addr-0", None), (3, "addr-3", Some("savings"))))
     assert(back.contacts == ArrayBuffer(Store.Contact("Bob", "addr-bob")))
     assert(back.settings.fiat == "eur" && back.settings.nodes == Vector("https://node.example"))
+    assert(back.multisigs == ArrayBuffer(Store.Multisig("joint", 2, Vector("addr-0", "addr-bob", "addr-c"), "addr-ms")))
+    assert(new String(st.openSealed(back.nonces("tx/addr-0")), StandardCharsets.UTF_8) == "nonce")
   }
 
   test("a fresh store has the default settings and no wallets") {
@@ -244,8 +248,9 @@ class StoreSpec extends AnyFunSuite {
     assertThrows[IllegalStateException](Store.openBackup(target.resolveSibling("missing.json"), Pass.toCharArray))
   }
 
-  test("restoreInto replaces the wallet file, keeps the old one, and moves the key out of the backup object") {
+  test("restoreInto replaces the wallet file, keeps the old one, drops multisig nonces, and moves the key out of the backup object") {
     val (_, src, _) = storeWithWallet()
+    src.data.nonces("tx/addr-0") = src.sealSecret("nonce".getBytes(StandardCharsets.UTF_8))
     val backupFile = tempDir().resolve("backup.json")
     src.backup(backupFile)
 
@@ -259,6 +264,7 @@ class StoreSpec extends AnyFunSuite {
     assert(preview.locked, "the preview object must not keep a live key")
     restored.openSecret(restored.data.wallets.head).use(s => assert(new String(s.mnemonic) == Mnemonic))
     assert(Store.unlock(dir, Pass.toCharArray).data.wallets.head.name == "My savings", "opens with the backup's password")
+    assert(Store.unlock(dir, Pass.toCharArray).data.nonces.isEmpty, "multisig nonces of a backup are never restored")
 
     Files.move(dir.resolve("data.json.before-restore"), dir.resolve("data.json"), StandardCopyOption.REPLACE_EXISTING)
     assert(Store.unlock(dir, "the current password".toCharArray).data.contacts.head.label == "kept")

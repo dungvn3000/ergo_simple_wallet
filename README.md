@@ -131,6 +131,8 @@ Tests are written with ScalaTest:
   a broken node skipped, a node answering with other m/k rejected.
 - `StoreSpec` runs offline: the encrypted wallet file (permissions, round trip, wrong passwords, tampering, broken files),
   sealed mnemonics, lock/unlock, backup/restore and the password policy.
+- `MultisigSpec` runs offline: the k-of-n address, both signing rounds for 2-of-3, 3-of-4, 1-of-2 and 2-of-2 over
+  several inputs, and refused commitments, nonces and tampered proofs.
 - `ErgoSpec` runs offline, except two tests that need the network: transaction build/sign (appkit needs a node)
   and the explorer half of the token-info cache test.
 
@@ -182,6 +184,7 @@ Wallet tabs:
 | Receive | Payment request link + QR code |
 | Transactions | Transaction history (from the explorer) |
 | Addresses | Derive more addresses, rescan, labels |
+| Multisig | k-of-n addresses shared with other wallets: create, verified balance, send (ERG only), co-sign |
 | Wallet settings | Rename, show mnemonic/xpub, delete wallet |
 
 *Tools* menu:
@@ -198,6 +201,36 @@ Wallet tabs:
 - **Sync NiPoPoW now / Refresh balances**: re-sync the chain and balances.
 
 QR codes are read from image files or a screenshot in the clipboard. The wallet does not use a webcam.
+
+### Multisig (k-of-n)
+
+A multisig address is the contract `atLeast(k, Coll(PK(a), PK(b), …))`: any k of the n participants can spend from it.
+Every participant creates it in the *Multisig* tab from the **same addresses in the same order** and the same k, and so gets the same address.
+
+Ergo's signatures are interactive (two rounds), so a spend goes round the signers as one **signing file** (JSON, no server involved).
+For 2 signers on two wallets:
+
+1. **Wallet 1** chooses *Send…*, confirms the transaction and saves the signing file. Its commitment is added at once;
+   that needs no password (a commitment is a random nonce for a public key, it signs nothing).
+2. **Wallet 2** opens the file (*Open signing file…*), confirms, enters its password: it commits and signs in one go.
+3. The file goes **back to wallet 1**, which opens it, enters its password and signs; the transaction is then complete
+   and submitted.
+
+So each signer enters its password once. With k > 2 the other signers commit first (step 2 without signing until all
+k have committed), then sign in any order; the k-th signature submits. A wallet holding k signer addresses itself
+needs no file: *Send…* signs and submits at once.
+
+Before committing or signing, the wallet checks that every input is an AVL-verified box of a multisig address in its
+*Multisig* tab and that the file's signing condition is exactly that address's k and participants. So each signer must
+have added the address and refreshed its balance; a file that fails the check is refused (a forged file could otherwise
+turn a partial signature into a valid signature for one of your plain addresses).
+
+A commitment is used for one signature only: the wallet deletes it as it signs, because signing a second challenge with
+it would reveal the private key. If the file gets lost after round 1, start again with a new *Send…*.
+For the same reason *Restore from backup…* drops all commitments: a backup may hold one that was used since. Signing
+files in progress must then be started again. Never copy an older `data.json` back by hand.
+Like Ergo's own multisig, this two-round scheme is weakened if one signer runs many signing sessions at the same time
+with untrusted co-signers: keep sessions few and one at a time.
 
 ## Settings
 

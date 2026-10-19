@@ -68,7 +68,7 @@ final class Store private (file: Path, val data: Store.Data) {
   }
 
   /**
-   * Makes this (opened backup) the wallet file in `dir`, keeping the backup's password.
+   * Makes this (opened backup) the wallet file in `dir`, keeping the backup's password. Its multisig nonces are dropped.
    * The file being replaced is kept as data.json.before-restore.
    */
   def restoreInto(dir: Path): Store = {
@@ -78,6 +78,8 @@ final class Store private (file: Path, val data: Store.Data) {
     } catch {
       case e: IOException => throw new IllegalStateException(s"Cannot keep the current wallet file: ${e.getMessage}", e)
     }
+    // a backup can hold multisig nonces that were used after it was taken: signing again with one reveals the key
+    data.nonces.clear()
     val s = new Store(target, data)
     s.adopt(mem, iterations, parallelism, salt, key)
     key = null // moved, not copied: this backup object must not keep a live key
@@ -160,6 +162,8 @@ final class Store private (file: Path, val data: Store.Data) {
   /** The wallet's mnemonic as a wipeable Secret; close it right after use (see [[Secret.use]]). */
   def openSecret(w: Wallet): Secret = parseSecret(open(w.secret))
 
+  def openSealed(sealedSecret: String): Array[Byte] = open(sealedSecret)
+
   private def open(sealedSecret: String): Array[Byte] = {
     val b = Ergo.unb64(sealedSecret)
     aes(Cipher.DECRYPT_MODE, currentKey, b.take(12), null, b, 12, b.length - 12)
@@ -184,8 +188,13 @@ object Store {
 
   final case class Contact(label: String, address: String)
 
+  /** A k-of-n multisig address; any wallet holding one of the participant addresses can co-sign. */
+  final case class Multisig(name: String, k: Int, participants: Vector[String], address: String)
+
+  /** `nonces`: sealed secret commitments of multisig signing sessions, by unsigned tx id and wallet; dropped once used. */
   final class Data(var settings: Settings = new Settings, val wallets: ArrayBuffer[Wallet] = ArrayBuffer.empty,
-                   val contacts: ArrayBuffer[Contact] = ArrayBuffer.empty)
+                   val contacts: ArrayBuffer[Contact] = ArrayBuffer.empty, val multisigs: ArrayBuffer[Multisig] = ArrayBuffer.empty,
+                   val nonces: collection.mutable.Map[String, String] = collection.mutable.Map.empty)
 
   private implicit val settingsEnc: Encoder[Settings] = Encoder.forProduct3("nodes", "explorerApi", "fiat")(s => (s.nodes, s.explorerApi, s.fiat))
   private implicit val settingsDec: Decoder[Settings] = Decoder.forProduct3("nodes", "explorerApi", "fiat")(
@@ -199,10 +208,15 @@ object Store {
     (n: String, f: String, s: String, x: String, a: Vector[Addr]) => new Wallet(n, f, s, x, ArrayBuffer(a: _*)))
   private implicit val contactEnc: Encoder[Contact] = Encoder.forProduct2("label", "address")(c => (c.label, c.address))
   private implicit val contactDec: Decoder[Contact] = Decoder.forProduct2("label", "address")(Contact.apply)
-  private implicit val dataEnc: Encoder[Data] = Encoder.forProduct3("settings", "wallets", "contacts")(
-    d => (d.settings, d.wallets.toVector, d.contacts.toVector))
-  private implicit val dataDec: Decoder[Data] = Decoder.forProduct3("settings", "wallets", "contacts")(
-    (s: Settings, w: Vector[Wallet], c: Vector[Contact]) => new Data(s, ArrayBuffer(w: _*), ArrayBuffer(c: _*)))
+  private implicit val multisigEnc: Encoder[Multisig] = Encoder.forProduct4("name", "k", "participants", "address")(
+    m => (m.name, m.k, m.participants, m.address))
+  private implicit val multisigDec: Decoder[Multisig] = Decoder.forProduct4("name", "k", "participants", "address")(Multisig.apply)
+  private implicit val dataEnc: Encoder[Data] = Encoder.forProduct5("settings", "wallets", "contacts", "multisigs", "nonces")(
+    d => (d.settings, d.wallets.toVector, d.contacts.toVector, d.multisigs.toVector, d.nonces.toMap))
+  // multisigs and nonces are absent from files written before multisig support
+  private implicit val dataDec: Decoder[Data] = Decoder.forProduct5("settings", "wallets", "contacts", "multisigs", "nonces")(
+    (s: Settings, w: Vector[Wallet], c: Vector[Contact], m: Option[Vector[Multisig]], n: Option[Map[String, String]]) =>
+      new Data(s, ArrayBuffer(w: _*), ArrayBuffer(c: _*), ArrayBuffer(m.getOrElse(Vector.empty): _*), collection.mutable.Map(n.getOrElse(Map.empty).toSeq: _*)))
   private val JsonPrinter = Printer.noSpaces.copy(dropNullValues = true)
 
   // ---------------------------------------------------------------- file format

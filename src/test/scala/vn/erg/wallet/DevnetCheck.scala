@@ -77,6 +77,25 @@ object DevnetCheck {
     check(h.size == 4 && h.exists(_.tokenDelta == Map(tokenId -> 100000L)) && h.exists(_.tokenDelta == Map(tokenId -> -1234L)),
       "four rows, including +1000 and -12.34 DevUSD")
 
+    step("Multisig 2-of-3 (wallet indices 0, 1, 2): fund it, then indices 2 and 0 co-sign 1 ERG back, index 1 absent")
+    val signers = (0 until 3).map(i => Ergo.address(secret, i))
+    val ms = Multisig.address(2, signers)
+    val fund = Ergo.prepareTx(Node, left, me, ms, 3000000000L, Map.empty, Parameters.MinFee)
+    Ergo.submit(client.bestNode, secret.use(s => Ergo.signReduced(fund, s, Seq(0))))
+    val msBoxes = waitForBalance(client, ms, 3000000000L, log)
+    var session = Multisig.start(Ergo.prepareTx(Node, msBoxes, ms, nodeAddress, 1000000000L, Map.empty, Parameters.MinFee))
+    Multisig.checkInputs(session, 2, signers, msBoxes.map(b => org.bouncycastle.util.encoders.Hex.toHexString(b.id)).toSet)
+    check(true, "inputs are verified boxes of the multisig, condition is its 2 of 3")
+    val nonces = Seq(2, 0).map { i =>
+      val (next, ns) = Multisig.commit(session, Seq(Address.create(signers(i)).getPublicKey))
+      session = Multisig.fromJson(Multisig.toJson(next)) // as passed around in the signing file
+      i -> ns
+    }
+    nonces.foreach { case (i, ns) => session = Multisig.fromJson(Multisig.toJson(secret.use(s => Multisig.sign(session, Ergo.dlogSecrets(s, Seq(i)), ns)))) }
+    check(Multisig.complete(session), Multisig.status(session))
+    println("  submitted " + Ergo.submit(client.bestNode, Multisig.signedTx(session)))
+    waitForBalance(client, ms, 3000000000L - 1000000000L - Parameters.MinFee, log)
+
     println("\nDEVNET CHECK PASSED")
   }
 

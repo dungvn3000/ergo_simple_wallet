@@ -442,7 +442,7 @@ final class WalletApp {
 
   private def refreshAll(): Unit = if (client.best.isDefined) {
     // snapshot on the EDT: the worker must never iterate lists the UI mutates (add/remove address)
-    val wallets = store.data.wallets.map(addresses).toVector
+    val wallets = store.data.wallets.map(addresses).toVector :+ store.data.multisigs.map(_.address).toVector
     bg("Verifying balances") {
       wallets.foreach(loadBoxes)
       fiatPrice = Ergo.fiatPrice(store.data.settings.fiat)
@@ -775,6 +775,8 @@ final class WalletApp {
     tabs.addTab("Receive", receive.panel)
     tabs.addTab("Transactions", new HistoryPanel(this).panel)
     tabs.addTab("Addresses", addressesPanel())
+    private val multisig = new MultisigPanel(this)
+    tabs.addTab("Multisig", multisig.panel)
     tabs.addTab("Wallet settings", settingsPanel())
 
     def update(): Unit = {
@@ -797,6 +799,7 @@ final class WalletApp {
         if (boxes.containsKey(a.address)) Ergo.erg(balance(Seq(a.address))) else "…")))
       send.update()
       receive.update()
+      multisig.update()
     }
 
     private def overview(): JComponent = {
@@ -1051,6 +1054,203 @@ final class WalletApp {
           }
       }
     }
+  }
+
+  // ---------------------------------------------------------------- multisig
+
+  /**
+   * k-of-n addresses this wallet co-signs. A spend travels as a signing file: the creator saves it, each of k signers
+   * opens it to add a commitment, then again (in any order) to sign; whoever adds the last signature submits it.
+   */
+  private final class MultisigPanel(v: WalletView) {
+    private val model = Dialogs.table("Name", "Signers", "Address", "ERG")
+    private val t = new JTable(model)
+    private var shown = Vector.empty[Store.Multisig]
+    val panel = new JPanel(new BorderLayout(0, 8))
+
+    t.getColumnModel.getColumn(2).setPreferredWidth(420)
+    panel.setBorder(BorderFactory.createEmptyBorder(14, 14, 14, 14))
+    panel.add(new JScrollPane(t), BorderLayout.CENTER)
+    panel.add(row(button("New multisig address…")(create()), button("Copy address")(selectedMs().foreach(m => Dialogs.copy(m.address))),
+      button("Send…")(selectedMs().foreach(send)), button("Open signing file…")(open()), button("Refresh")(refreshMs()),
+      button("Remove")(selectedMs().foreach(remove))), BorderLayout.SOUTH)
+
+    def update(): Unit = {
+      val mine = addresses(v.w).toSet
+      shown = store.data.multisigs.filter(_.participants.exists(mine)).toVector
+      model.setRowCount(0)
+      shown.foreach(m => model.addRow(boxed(m.name, s"${m.k} of ${m.participants.size}", m.address,
+        if (boxes.containsKey(m.address)) Ergo.erg(balance(Seq(m.address))) else "…")))
+    }
+
+    private def selectedMs(): Option[Store.Multisig] = {
+      val r = Option(t.getSelectedRow).filter(_ >= 0).map(shown)
+      if (r.isEmpty) Dialogs.error(frame, "Select a multisig address first.")
+      r
+    }
+
+    private def refreshMs(): Unit = if (chainReady) {
+      val addrs = shown.map(_.address)
+      bg("Verifying multisig balances")(loadBoxes(addrs))(_ => update())
+    }
+
+    private def create(): Unit = {
+      val name = new JTextField("Multisig", 20)
+      val k = new JSpinner(new SpinnerNumberModel(2, 1, 20, 1))
+      val ps = Dialogs.textArea(v.w.firstAddress + "\n", 6, editable = true)
+      val hint = new JLabel("<html><div style='width:420px'>One P2PK address per line, yours included. Every co-signer must enter " +
+        "the same addresses in the same order and the same number of signatures, or they get a different address.</div></html>")
+      if (Dialogs.confirm(frame, form("Name", name, "Signatures needed", k, "Participants", new JScrollPane(ps), null, hint), "New multisig address")) {
+        try {
+          val parts = ps.getText.split("\\s+").map(_.trim).filter(_.nonEmpty).toVector
+          if (!parts.exists(addresses(v.w).toSet)) throw new IllegalArgumentException("None of the participants is an address of this wallet")
+          val m = Store.Multisig(Option(name.getText.trim).filter(_.nonEmpty).getOrElse("Multisig"), k.getValue.asInstanceOf[Int], parts,
+            Multisig.address(k.getValue.asInstanceOf[Int], parts))
+          if (!store.data.multisigs.exists(_.address == m.address)) {
+            store.data.multisigs += m
+            store.save()
+          }
+          update()
+          if (client.best.isDefined) refreshMs()
+          Dialogs.info(frame, form(null, new JLabel(s"${m.k}-of-${parts.size} address. Receive funds on it:"), null, Dialogs.readOnlyField(m.address),
+            null, row(button("Copy")(Dialogs.copy(m.address)))), m.name)
+        } catch { case e: IllegalArgumentException => Dialogs.error(frame, e.getMessage) }
+      }
+    }
+
+    private def remove(m: Store.Multisig): Unit =
+      if (Dialogs.confirm(frame, s"Remove ${m.name} from the list?\nFunds stay on chain; add it again with the same participants.", "Remove")) {
+        store.data.multisigs -= m
+        store.save()
+        update()
+      }
+
+    // shortcut: ERG only, no tokens; reuse SendPanel's token table if co-signed token transfers are needed
+    private def send(m: Store.Multisig): Unit = if (chainReady && boxes.containsKey(m.address)) {
+      val to = new JTextField(40)
+      val amount = new JTextField(14)
+      if (!Dialogs.confirm(frame, form("From", new JLabel(s"${m.name}: ${Ergo.erg(balance(Seq(m.address)))} ERG"), "To", to, "Amount (ERG)", amount,
+        "Fee (ERG)", new JLabel(Ergo.erg(Parameters.MinFee))), "Send from multisig")) return
+      val parsed = try {
+        if (!Ergo.isValidAddress(to.getText.trim)) throw new IllegalArgumentException("Invalid recipient address")
+        val nano = Ergo.nanoErg(amount.getText)
+        if (nano < Parameters.MinChangeValue) throw new IllegalArgumentException(s"Amount must be at least ${Ergo.erg(Parameters.MinChangeValue)} ERG")
+        Right(nano)
+      } catch {
+        case _: ArithmeticException => Left("Too many decimal places")
+        case e: RuntimeException => Left(e.getMessage)
+      }
+      parsed match {
+        case Left(err) => Dialogs.error(frame, err)
+        case Right(nano) =>
+          val avail = boxesOf(Seq(m.address))
+          val myBoxes = avail.map(b => org.bouncycastle.util.encoders.Hex.toHexString(b.id) -> b).toMap
+          val recipient = to.getText.trim
+          bg("Preparing multisig transaction") {
+            val reduced = Ergo.prepareTx(client.bestNode, avail, m.address, recipient, nano, Map.empty, Parameters.MinFee)
+            (Multisig.start(reduced), describe(Ergo.summarize(reduced), myBoxes, Set(m.address)))
+          } { case (session, desc) =>
+            val own = v.w.addresses.filter(a => m.participants.contains(a.address)).map(_.index)
+            // this wallet alone holds k signer keys: both rounds run here, no file to pass around
+            if (own.size >= m.k) {
+              if (Dialogs.confirm(frame, txText(desc), "Confirm transaction")) signAlone(session, own)
+            } else if (Dialogs.confirm(frame, txText(desc), "Confirm, then save the signing file")) saveAs(session, desc)
+          }
+      }
+    } else if (client.best.isDefined) Dialogs.error(frame, "Balance is not verified yet. Press Refresh.")
+
+    /** Nonces stay in memory: nothing leaves the wallet before the transaction is fully signed. */
+    private def signAlone(s: Multisig.Session, indices: Seq[Int]): Unit = if (confirmPassword("Sign multisig transaction")) {
+      val signed = try store.openSecret(v.w).use { sec =>
+        val keys = Ergo.dlogSecrets(sec, indices)
+        val (committed, nonces) = Multisig.commit(s, keys.map(_.publicImage))
+        Some(Multisig.sign(committed, keys, nonces))
+      } catch { case e: IllegalArgumentException => Dialogs.error(frame, e.getMessage); None }
+      signed.foreach(submit)
+    }
+
+    private def saveAs(s: Multisig.Session, desc: String): Unit = {
+      val fc = new JFileChooser
+      fc.setSelectedFile(new java.io.File(s"multisig-${Multisig.id(s).take(8)}.json"))
+      if (fc.showSaveDialog(frame) == JFileChooser.APPROVE_OPTION) {
+        val path = fc.getSelectedFile.toPath
+        write(path, s)
+        // the creator has just confirmed this transaction: its own commitment (and signature, if it can) follows at once
+        try act(path, s, desc, confirmed = true) catch { case e: IllegalArgumentException => Dialogs.error(frame, e.getMessage) }
+      }
+    }
+
+    private def write(path: java.nio.file.Path, s: Multisig.Session): Unit = {
+      Files.write(path, Multisig.toJson(s).getBytes(java.nio.charset.StandardCharsets.UTF_8))
+      log(s"Multisig signing file written: $path (${Multisig.status(s)})")
+    }
+
+    private def open(): Unit = {
+      val fc = new JFileChooser
+      if (fc.showOpenDialog(frame) != JFileChooser.APPROVE_OPTION) return
+      val path = fc.getSelectedFile.toPath
+      val ms = shown.map(_.address)
+      val myBoxes = boxesOf(ms).map(b => org.bouncycastle.util.encoders.Hex.toHexString(b.id) -> b).toMap
+      val mine = ms.toSet ++ addresses(v.w)
+      bg("Reading signing file") {
+        val s = Multisig.fromJson(new String(Files.readAllBytes(path), java.nio.charset.StandardCharsets.UTF_8))
+        (s, describe(Ergo.summarize(s.reducedTx), myBoxes, mine))
+      } { case (s, desc) => try act(path, s, desc) catch { case e: IllegalArgumentException => Dialogs.error(frame, e.getMessage) } }
+    }
+
+    /** Offers the one step this wallet can take on the session: commit, sign or submit. */
+    private def act(path: java.nio.file.Path, s: Multisig.Session, desc: String, confirmed: Boolean = false): Unit = {
+      val (k, pks) = Multisig.required(s)
+      val id = Multisig.id(s) + "/" + v.w.firstAddress // two wallets of this app may co-sign the same transaction
+      val own = v.w.addresses.filter(a => pks.contains(Multisig.pkOf(a.address)))
+      val ownPks = own.map(a => Multisig.pkOf(a.address)).toSet
+      val committed = Multisig.committed(s)
+      val step =
+        if (Multisig.complete(s)) Some("Submit")
+        else if (committed.size < k && ownPks.exists(p => !committed.contains(p))) Some("Add my commitment")
+        else if (committed.size == k && store.data.nonces.contains(id) && ownPks.exists(p => committed.contains(p) && !s.signed.contains(p))) Some("Sign")
+        else None
+      val text = desc + s"\n${Multisig.status(s)}\n" +
+        step.fold(if (own.isEmpty) "This wallet is not a signer of this transaction." else "Nothing to do for this wallet: pass the file on.")(a => s"Next step for this wallet: $a")
+      if (step.exists(_ != "Submit")) {
+        val m = shown.find(m => Multisig.matches(s, m.k, m.participants)).getOrElse(throw new IllegalArgumentException("This file does not spend from any multisig address of this wallet. " +
+            "Add the address first (same participants, same order), refresh, then open the file again."))
+        Multisig.checkInputs(s, m.k, m.participants, boxesOf(Seq(m.address)).map(b => org.bouncycastle.util.encoders.Hex.toHexString(b.id)).toSet)
+      }
+      if (step.isEmpty) Dialogs.info(frame, txText(text), "Multisig signing file")
+      else if (confirmed || Dialogs.confirm(frame, txText(text), step.get)) step.get match {
+        case "Submit" => submit(s)
+        case "Add my commitment" => if (!store.locked) {
+          // no password: a commitment is a random nonce for our public keys, it reveals and signs nothing
+          val (next, nonces) = Multisig.commit(s, own.map(a => Address.create(a.address).getPublicKey))
+          // merged: a wallet with two signer addresses may commit for them in two steps
+          val earlier = store.data.nonces.get(id).fold(Vector.empty[Multisig.Nonce])(n => Multisig.noncesFromBytes(store.openSealed(n)))
+          store.data.nonces(id) = store.sealSecret(Multisig.noncesToBytes(earlier ++ nonces))
+          store.save()
+          write(path, next)
+          // all commitments in: this wallet may be a signer of round 2 itself (e.g. it holds several signer addresses)
+          if (Multisig.committed(next).size == k) act(path, next, desc, confirmed)
+          else Dialogs.info(frame, s"Commitment added to ${path.getFileName}. ${Multisig.status(next)}. Pass the file on.", "Multisig")
+        }
+        case _ => if (confirmPassword("Sign multisig transaction")) {
+          val nonces = Multisig.noncesFromBytes(store.openSealed(store.data.nonces(id)))
+          val next = store.openSecret(v.w).use(sec => Multisig.sign(s, Ergo.dlogSecrets(sec, own.map(_.index)), nonces))
+          // forget the nonces before the signature leaves: signing a second challenge with them would reveal the key
+          store.data.nonces -= id
+          store.save()
+          write(path, next)
+          if (Multisig.complete(next)) submit(next)
+          else Dialogs.info(frame, s"Signed. ${Multisig.status(next)}. Send ${path.getFileName} to a signer who has not signed yet " +
+            "(the one who created it, if it was not you): its signature completes and submits the transaction.", "Multisig")
+        }
+      }
+    }
+
+    private def submit(s: Multisig.Session): Unit = if (chainReady)
+      bg("Submitting multisig transaction")(Ergo.submit(client.bestNode, Multisig.signedTx(s))) { txId =>
+        submitted(txId)
+        refreshMs()
+      }
   }
 
   // ---------------------------------------------------------------- receive
