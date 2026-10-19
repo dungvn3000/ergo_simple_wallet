@@ -6,11 +6,17 @@ then proves that every box of the wallet is unspent with an AVL proof checked ag
 
 > [!WARNING]
 > **Disclaimer: experimental software, use at your own risk.**
-> - This wallet has **not been audited** and has only been tested end to end on a local devnet; it has never sent a
->   real mainnet transaction. Bugs can lose funds. Try a small amount first, and never keep more in it than you can
+> - This wallet has **not been audited**. It is tested end to end on a local devnet and has sent only very few real
+>   mainnet transactions. Bugs can lose funds. Try a small amount first, and never keep more in it than you can
 >   afford to lose.
-> - **Back up your mnemonic** on paper. The encrypted wallet file and its backups are useless without the password,
->   and no one can recover a lost mnemonic or password for you.
+> - **Multisig is the newest and least tested feature** (a single mainnet spend so far). Test a multisig address with a
+>   small amount, receive and spend, before you rely on it, and check every signer address with its owner.
+> - **Back up your mnemonic** on paper. The encrypted wallet file and its backups are useless without the password.
+> - **No custody, no support for recovery.** The wallet has no server and nobody else holds your keys: the authors
+>   cannot see, freeze, recover or return funds, and will never ask for your mnemonic, password or wallet file.
+>   A lost mnemonic, or more lost multisig keys than k-of-n allows, means lost funds. Anyone offering to
+>   "recover" a wallet for you is a scammer.
+> - Download it only from this repository, or build it yourself from the source.
 > - It is an independent project, **not affiliated with or endorsed by the Ergo Platform or the Ergo Foundation**.
 > - Token names, history, prices and fee suggestions come from third parties and are not verified. Always check the
 >   recipient, the amounts and the "This wallet gives" line before you sign.
