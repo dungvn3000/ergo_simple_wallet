@@ -38,6 +38,7 @@ class ErgoSpec extends AnyFunSuite {
       assert(Bip39.wordRanges(g).size == n)
       assert(Bip39.normalize(g).sameElements(g))
     }
+    for (n <- Seq(0, 11, 13, 27)) assertThrows[IllegalArgumentException](Bip39.generate(n))
     // official BIP39 vector (entropy 0x00..00, 12 words, empty passphrase)
     val v = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about".toCharArray
     assert(Hex.toHexString(Bip39.seed(Bip39.normalize(v))) ==

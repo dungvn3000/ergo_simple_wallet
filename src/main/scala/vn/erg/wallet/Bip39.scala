@@ -22,6 +22,7 @@ object Bip39 {
 
   /** New mnemonic with `wordCount` words (12..24, multiple of 3). */
   def generate(wordCount: Int): Array[Char] = {
+    require(wordCount >= 12 && wordCount <= 24 && wordCount % 3 == 0, s"BIP39 word count must be 12..24 and a multiple of 3, got $wordCount")
     val entropy = new Array[Byte](wordCount * 11 * 32 / 33 / 8)
     new SecureRandom().nextBytes(entropy)
     val idx = indices(entropy, wordCount)
