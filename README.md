@@ -34,9 +34,13 @@ regenerate them with `devnet/screenshots.sh`.
 |---|---|
 | ![Receive](docs/screenshots/receive.png) | ![History](docs/screenshots/history.png) |
 
-| Addresses: derived addresses, labels, rescan |
+| Addresses: derived addresses, labels, rescan | Multisig: shared 2-of-3 address, proven balance |
+|---|---|
+| ![Addresses](docs/screenshots/addresses.png) | ![Multisig](docs/screenshots/multisig.png) |
+
+| Multisig spend: confirmation before the signing file |
 |---|
-| ![Addresses](docs/screenshots/addresses.png) |
+| ![Multisig confirmation](docs/screenshots/multisig-confirm.png) |
 
 ## What is NiPoPoW for?
 

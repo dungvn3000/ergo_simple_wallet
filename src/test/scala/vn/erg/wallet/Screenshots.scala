@@ -34,21 +34,28 @@ object Screenshots {
         ArrayBuffer(new Store.Addr(0, first), new Store.Addr(1, Ergo.derive(xpub, 1), Some("Savings"))))
     }
     val main = wallet("Main wallet")
+    val trading = wallet("Trading")
     st.data.wallets += main
-    st.data.wallets += wallet("Trading")
+    st.data.wallets += trading
     val nodeAddress = JsonParser.parseString(DevnetCheck.nodeWallet("addresses", null)).getAsJsonArray.get(0).getAsString
     st.data.contacts += Store.Contact("Alice", nodeAddress)
+    // a 2-of-3 shared with the Trading wallet and Alice
+    val signers = Vector(main.firstAddress, trading.firstAddress, nodeAddress)
+    val ms = Store.Multisig("Family savings", 2, signers, Multisig.address(2, signers))
+    st.data.multisigs += ms
     st.save()
     st.lock()
 
     val (a0, a1) = (main.addresses(0).address, main.addresses(1).address)
     DevnetCheck.nodeWallet("payment/send", s"""[{"address":"$a0","value":125500000000}]""")
     DevnetCheck.nodeWallet("payment/send", s"""[{"address":"$a1","value":40000000000}]""")
+    DevnetCheck.nodeWallet("payment/send", s"""[{"address":"${ms.address}","value":300000000000}]""")
     DevnetCheck.nodeWallet("transaction/send", s"""{"requests":[{"address":"$a0","ergValue":1000000,"amount":250000,""" +
       s""""name":"DevUSD","description":"Devnet stablecoin for testing","decimals":2}],"fee":1000000}""")
     waitUntil("funding mined", 120) {
       val b = JsonParser.parseString(Http.post(s"$Node/blockchain/balance", "text/plain", a0)).getAsJsonObject.getAsJsonObject("confirmed")
-      b.get("nanoErgs").getAsLong == 125501000000L && b.getAsJsonArray("tokens").size == 1
+      val m = JsonParser.parseString(Http.post(s"$Node/blockchain/balance", "text/plain", ms.address)).getAsJsonObject.getAsJsonObject("confirmed")
+      b.get("nanoErgs").getAsLong == 125501000000L && b.getAsJsonArray("tokens").size == 1 && m.get("nanoErgs").getAsLong == 300000000000L
     }
 
     // ---- open the app and unlock it
@@ -113,6 +120,28 @@ object Screenshots {
 
     tab(4)
     shot(out, "addresses", frame.getRootPane)
+
+    // multisig: the shared address with its proven balance, then a spend's confirmation before the signing file
+    tab(5)
+    val multisig = tabs.getComponentAt(5).asInstanceOf[JComponent]
+    val msTable = onEdt(find[JTable](multisig).head)
+    waitUntil("multisig balance", 120)(onEdt(msTable.getRowCount == 1 && msTable.getValueAt(0, 3) == "300"))
+    onEdt(msTable.setRowSelectionInterval(0, 0))
+    Thread.sleep(300)
+    shot(out, "multisig", frame.getRootPane)
+    // later, not onEdt: the form is a modal dialog, it would block invokeAndWait
+    SwingUtilities.invokeLater(() => find[JButton](multisig).find(_.getText == "Send…").get.doClick())
+    val form = waitFor("multisig send form", 30)(dialogs.find(_.getTitle == "Send from multisig"))
+    onEdt {
+      val fields = find[JTextField](form).filter(_.isEditable)
+      fields(0).setText(nodeAddress)
+      fields(1).setText("25")
+      find[JOptionPane](form).head.setValue(Integer.valueOf(JOptionPane.OK_OPTION))
+    }
+    val msConfirm = waitFor("multisig confirmation", 60)(dialogs.find(_.getTitle == "Confirm, then save the signing file"))
+    Thread.sleep(300)
+    shot(out, "multisig-confirm", msConfirm.getRootPane)
+    onEdt(find[JOptionPane](msConfirm).head.setValue(Integer.valueOf(JOptionPane.CANCEL_OPTION)))
 
     println(s"Screenshots written to $out")
     sys.exit(0)
